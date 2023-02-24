@@ -1,10 +1,16 @@
-import config
+import asyncio
+import logging
 
-import openai
-openai.api_key = config.openai_api_key
+from revChatGPT.V1 import Chatbot
 
+logger = logging.getLogger(__name__)
 
 CHAT_MODES = {
+    "normal": {
+        "name": "🤖 Normal Bot",
+        "welcome_message": "🤖 Hi, I'm <b>ChatGPT Bot</b>. How can I help you?",
+        "prompt_start": ""
+    },
     "assistant": {
         "name": "👩🏼‍🎓 Assistant",
         "welcome_message": "👩🏼‍🎓 Hi, I'm <b>ChatGPT assistant</b>. How can I help you?",
@@ -32,60 +38,60 @@ CHAT_MODES = {
 
 
 class ChatGPT:
-    def __init__(self):
-        pass
-    
-    def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
+    def __init__(self, gpt_bot: Chatbot):
+        self.gpt_bot = gpt_bot
+
+    def send_message(self, message, dialog_messages=[], chat_mode="normal", conversation_id: str = None,
+                     parent_id: str = None):
         if chat_mode not in CHAT_MODES.keys():
             raise ValueError(f"Chat mode {chat_mode} is not supported")
 
         n_dialog_messages_before = len(dialog_messages)
         answer = None
+        prompt = None
         while answer is None:
             prompt = self._generate_prompt(message, dialog_messages, chat_mode)
+            logger.info(f"Ask ChatGPT: {prompt}")
             try:
-                r = openai.Completion.create(
-                    engine="text-davinci-003",
-                    prompt=prompt,
-                    temperature=0.7,
-                    max_tokens=1000,
-                    top_p=1,
-                    frequency_penalty=0,
-                    presence_penalty=0,
-                )
-                answer = r.choices[0].text
+                for data in self.gpt_bot.ask(prompt, conversation_id=conversation_id, parent_id=parent_id):
+                    answer = data['message']
+                    conversation_id = data['conversation_id']
+                    parent_id = data['parent_id']
                 answer = self._postprocess_answer(answer)
 
-                n_used_tokens = r.usage.total_tokens
-
-            except openai.error.InvalidRequestError as e:  # too many tokens
+            except Exception as e:  # too many tokens
+                logger.error(f"Ask ChatGPT error: {str(e)}")
                 if len(dialog_messages) == 0:
-                    raise ValueError("Dialog messages is reduced to zero, but still has too many tokens to make completion") from e
+                    raise ValueError(f"ChatGPT Bot error: {str(e)}") from e
 
                 # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
 
         n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
 
-        return answer, prompt, n_used_tokens, n_first_dialog_messages_removed
+        return answer, prompt, conversation_id, parent_id, n_first_dialog_messages_removed
 
-    def _generate_prompt(self, message, dialog_messages, chat_mode):
-        prompt = CHAT_MODES[chat_mode]["prompt_start"]
-        prompt += "\n\n"
+    @staticmethod
+    def _generate_prompt(message, dialog_messages, chat_mode):
+        if chat_mode != "normal":
+            prompt = CHAT_MODES[chat_mode]["prompt_start"]
+            prompt += "\n\n"
 
-        # add chat context
-        if len(dialog_messages) > 0:
-            prompt += "Chat:\n"
-            for dialog_message in dialog_messages:
-                prompt += f"User: {dialog_message['user']}\n"
-                prompt += f"ChatGPT: {dialog_message['bot']}\n"
+            # add chat context
+            # if len(dialog_messages) > 0:
+            #     prompt += "Chat:\n"
+            #     for dialog_message in dialog_messages:
+            #         prompt += f"User: {dialog_message['user']}\n"
+            #         prompt += f"ChatGPT: {dialog_message['bot']}\n"
 
-        # current message
-        prompt += f"User: {message}\n"
-        prompt += "ChatGPT: "
+            # current message
+            prompt += f"User: {message}\n"
+            prompt += "ChatGPT: "
 
-        return prompt
+            return prompt
+        return message
 
-    def _postprocess_answer(self, answer):
+    @staticmethod
+    def _postprocess_answer(answer):
         answer = answer.strip()
         return answer
