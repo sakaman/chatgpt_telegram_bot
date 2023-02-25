@@ -7,6 +7,10 @@ services:
     restart: always
     volumes:
       - ~/docker/mongodb:/data/db
+    deploy:
+      resources:
+        limits:
+          memory: 50M
     # TODO: add auth
 
   chatgpt_telegram_bot:
@@ -14,7 +18,11 @@ services:
     image: desnowy/chatgpt-telegram-bot:latest
     restart: always
     volumes:
-      - ~/docker/config:/config
+      - ~/config:/config
+    deploy:
+      resources:
+        limits:
+          memory: 60M
     depends_on:
       - mongo
 
@@ -29,5 +37,9 @@ services:
       - ME_CONFIG_MONGODB_AUTH_DATABASE=chatgpt_telegram_bot
       - ME_CONFIG_BASICAUTH_USERNAME=${MONGO_EXPRESS_USERNAME:-username}
       - ME_CONFIG_BASICAUTH_PASSWORD=${MONGO_EXPRESS_PASSWORD:-password}
+    deploy:
+      resources:
+        limits:
+          memory: 50M
     depends_on:
       - mongo

@@ -36,9 +36,12 @@ email = config.openai_email
 password = config.openai_password
 chatgpt_bot = Chatbot(config={"email": email, "password": password})
 
+# Disable certificate verification
+# ssl._create_default_https_context = ssl._create_unverified_context
+
 HELP_MESSAGE = """Commands:
-⚪ /retry – Regenerate last bot answer
 ⚪ /new – Start new dialog
+⚪ /retry – Regenerate last bot answer
 ⚪ /mode – Select chat mode
 ⚪ /help – Show help
 """
@@ -260,6 +263,10 @@ def run_bot() -> None:
     application = (
         ApplicationBuilder()
         .token(config.telegram_token)
+        .connect_timeout(60)
+        .read_timeout(60)
+        .write_timeout(60)
+        .pool_timeout(60)
         .build()
     )
 
