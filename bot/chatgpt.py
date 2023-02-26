@@ -8,6 +8,8 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest, RetryAfter
 from telegram.ext import ContextTypes
 
+import utils
+
 logger = logging.getLogger(__name__)
 
 CHAT_MODES = {
@@ -80,6 +82,9 @@ class ChatGPT:
         if chat_mode not in CHAT_MODES.keys():
             raise ValueError(f"Chat mode {chat_mode} is not supported")
 
+        # Send "Typing..." action periodically every 4 seconds until the response is received
+        typing_task = context.application.create_task(utils.send_typing_periodically(update, context, 4))
+
         prompt = self._generate_prompt(update.message.text, dialog_messages, chat_mode)
 
         initial_message: Message or None = None
@@ -93,6 +98,7 @@ class ChatGPT:
                 except (BadRequest, HTTPError, RetryAfter):
                     pass
                 except Exception as e:
+                    typing_task.cancel()
                     logger.error(f"Error while editing the message: {str(e)}")
 
                 await asyncio.sleep(every_seconds)
@@ -110,6 +116,7 @@ class ChatGPT:
             chunk_index, chunk_text = (chunk_index + 1, chunk['message'])
 
         message_update_task.cancel()
+        typing_task.cancel()
         await initial_message.edit_text(chunk_text, parse_mode=ParseMode.MARKDOWN)
         return chunk_text, prompt, conversation_id, parent_id
 
