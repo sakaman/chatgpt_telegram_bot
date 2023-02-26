@@ -6,16 +6,18 @@ import traceback
 from datetime import datetime
 
 import telegram
-from revChatGPT.V1 import Chatbot
+from httpx import HTTPError
+from revChatGPT.V1 import AsyncChatbot, Chatbot
 from telegram import Update, User, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode, ChatAction
+from telegram.error import BadRequest, RetryAfter
 from telegram.ext import (
     ApplicationBuilder,
     CallbackContext,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    filters
+    filters, ContextTypes
 )
 
 import chatgpt
@@ -34,7 +36,12 @@ logger = logging.getLogger(__name__)
 
 email = config.openai_email
 password = config.openai_password
-chatgpt_bot = Chatbot(config={"email": email, "password": password})
+async_chatgpt_bot: AsyncChatbot = None
+chatgpt_bot: Chatbot = None
+if config.use_stream:
+    async_chatgpt_bot = AsyncChatbot(config={"email": email, "password": password})
+else:
+    chatgpt_bot = Chatbot(config={"email": email, "password": password})
 
 # Disable certificate verification
 # ssl._create_default_https_context = ssl._create_unverified_context
@@ -121,55 +128,74 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     # Send "Typing..." action periodically every 4 seconds until the response is received
     # typing_task = context.application.create_task(send_typing_periodically(update, context, 4))
 
+    message = message or update.message.text
+
+    dialog_id = db.get_user_attribute(user_id, "current_dialog_id")
+    dialog_messages = db.get_dialog_messages(user_id, dialog_id)
+    conversation_id = db.get_dialog_attribute(user_id, "conversation_id", dialog_id)
+    parent_id = None
+    if len(dialog_messages) > 0:
+        parent_id = dialog_messages[-1]['parent_id']
+
+    answer = None
     try:
-        message = message or update.message.text
+        if config.use_stream:
+            answer, prompt, conversation_id, parent_id = await async_message_handle(
+                update,
+                context,
+                user_id,
+                dialog_id,
+                conversation_id,
+                parent_id)
+        else:
+            answer, prompt, conversation_id, parent_id = chatgpt.ChatGPT(
+                gpt_bot=chatgpt_bot).send_message(
+                message,
+                dialog_messages=db.get_dialog_messages(user_id, dialog_id),
+                chat_mode=db.get_user_attribute(user_id, "current_chat_mode"),
+                conversation_id=conversation_id,
+                parent_id=parent_id
+            )
 
-        dialog_id = db.get_user_attribute(user_id, "current_dialog_id")
-        dialog_messages = db.get_dialog_messages(user_id, dialog_id)
-        conversation_id = db.get_dialog_attribute(user_id, "conversation_id", dialog_id)
-        parent_id = None
-        if len(dialog_messages) > 0:
-            parent_id = dialog_messages[-1]['parent_id']
-        answer, prompt, conversation_id, parent_id, n_first_dialog_messages_removed = chatgpt.ChatGPT(
-            gpt_bot=chatgpt_bot).send_message(
-            message,
-            dialog_messages=db.get_dialog_messages(user_id, dialog_id),
-            chat_mode=db.get_user_attribute(user_id, "current_chat_mode"),
-            conversation_id=conversation_id,
-            parent_id=parent_id
-        )
-
-        # update user data
-        new_dialog_message = {"user": message, "bot": answer, "date": datetime.now(), "parent_id": parent_id}
-        db.set_dialog_messages(
-            user_id,
-            db.get_dialog_messages(user_id, dialog_id) + [new_dialog_message],
-            conversation_id,
-            dialog_id
-        )
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id,
+                                               text=answer,
+                                               parse_mode=ParseMode.MARKDOWN,
+                                               reply_to_message_id=update.message.message_id)
+            except telegram.error.BadRequest:
+                # answer has invalid characters, so we send it without parse_mode
+                await context.bot.send_message(chat_id=update.effective_chat.id,
+                                               text=answer,
+                                               reply_to_message_id=update.message.message_id)
+    except (BadRequest, HTTPError, RetryAfter):
+        pass
     except Exception as e:
-        error_text = f"Something went wrong during completion. Reason: {e}"
-        logger.error(error_text)
+        logger.error("Send message error", e)
+        error_text = f"Something went wrong during completion.\nReason: {e}"
         # typing_task.cancel()
         await update.message.reply_text(error_text)
         return
-
+    # update user data
+    new_dialog_message = {"user": message, "bot": answer, "date": datetime.now(), "parent_id": parent_id}
+    db.set_dialog_messages(
+        user_id,
+        db.get_dialog_messages(user_id, dialog_id) + [new_dialog_message],
+        conversation_id,
+        dialog_id
+    )
     # typing_task.cancel()
-    # send message if some messages were removed from the context
-    if n_first_dialog_messages_removed > 0:
-        if n_first_dialog_messages_removed == 1:
-            text = "✍️ __Note:__ Your current dialog is too long, so your **first message** was removed from the " \
-                   "context.\n Send /new command to start new dialog"
-        else:
-            text = f"✍️ __Note:__ Your current dialog is too long, so **{n_first_dialog_messages_removed} first " \
-                   f"messages** were removed from the context.\n Send /new command to start new dialog"
-        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
-    try:
-        await update.message.reply_text(answer, parse_mode=ParseMode.MARKDOWN)
-    except telegram.error.BadRequest:
-        # answer has invalid characters, so we send it without parse_mode
-        await update.message.reply_text(answer)
+
+async def async_message_handle(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id, dialog_id, conversation_id,
+                               parent_id):
+    return await chatgpt.ChatGPT(async_gpt_bot=async_chatgpt_bot).async_send_message(
+        update=update,
+        context=context,
+        dialog_messages=db.get_dialog_messages(user_id, dialog_id),
+        chat_mode=db.get_user_attribute(user_id, "current_chat_mode"),
+        conversation_id=conversation_id,
+        parent_id=parent_id
+    )
 
 
 async def send_typing_periodically(update: Update, context: CallbackContext, every_seconds: float):

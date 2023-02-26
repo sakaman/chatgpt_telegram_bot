@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime
 from typing import Optional, Any
@@ -125,6 +126,20 @@ class Database:
             dialog_id = self.get_user_attribute(user_id, "current_dialog_id")
 
         self.dialog_collection.update_one(
-            {"_id": dialog_id, "user_id": user_id, "conversation_id": conversation_id},
-            {"$set": {"messages": dialog_messages}}
+            {"_id": dialog_id, "user_id": user_id},
+            {"$set": {"conversation_id": conversation_id, "messages": dialog_messages}}
+        )
+
+    async def async_set_dialog_messages(self, user_id: int, dialog_messages: list, conversation_id: str,
+                                        dialog_id: Optional[str] = None):
+        self.check_if_user_exists(user_id, raise_exception=True)
+
+        if dialog_id is None:
+            dialog_id = self.get_user_attribute(user_id, "current_dialog_id")
+
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            self.dialog_collection.update_one,
+            {"_id": dialog_id, "user_id": user_id},
+            {"$set": {"conversation_id": conversation_id, "messages": dialog_messages}}
         )

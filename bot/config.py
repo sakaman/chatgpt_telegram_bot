@@ -21,3 +21,4 @@ mongodb_uri = f"mongodb://mongo:{config_env['MONGODB_PORT']}"
 # mongodb_uri = f"mongodb://devbox:{config_env['MONGODB_PORT']}"
 openai_email = config_yaml["openai_email"]
 openai_password = config_yaml["openai_password"]
+use_stream = (config_yaml["use_stream"] or 'True') == 'True'

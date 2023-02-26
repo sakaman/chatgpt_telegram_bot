@@ -1,7 +1,12 @@
 import asyncio
 import logging
 
-from revChatGPT.V1 import Chatbot
+from httpx import HTTPError
+from revChatGPT.V1 import Chatbot, AsyncChatbot
+from telegram import Message, Update
+from telegram.constants import ParseMode
+from telegram.error import BadRequest, RetryAfter
+from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +43,15 @@ CHAT_MODES = {
 
 
 class ChatGPT:
-    def __init__(self, gpt_bot: Chatbot):
+    def __init__(self, gpt_bot: Chatbot = None, async_gpt_bot: AsyncChatbot = None):
         self.gpt_bot = gpt_bot
+        self.async_gpt_bot = async_gpt_bot
 
     def send_message(self, message, dialog_messages=[], chat_mode="normal", conversation_id: str = None,
                      parent_id: str = None):
         if chat_mode not in CHAT_MODES.keys():
             raise ValueError(f"Chat mode {chat_mode} is not supported")
 
-        n_dialog_messages_before = len(dialog_messages)
         answer = None
         prompt = None
         while answer is None:
@@ -59,7 +64,7 @@ class ChatGPT:
                     parent_id = data['parent_id']
                 answer = self._postprocess_answer(answer)
 
-            except Exception as e:  # too many tokens
+            except Exception as e:
                 logger.error(f"Ask ChatGPT error: {str(e)}")
                 if len(dialog_messages) == 0:
                     raise ValueError(f"ChatGPT Bot error: {str(e)}") from e
@@ -67,9 +72,46 @@ class ChatGPT:
                 # forget first message in dialog_messages
                 dialog_messages = dialog_messages[1:]
 
-        n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
+        return answer, prompt, conversation_id, parent_id,
 
-        return answer, prompt, conversation_id, parent_id, n_first_dialog_messages_removed
+    async def async_send_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE, dialog_messages=[],
+                                 chat_mode="normal", conversation_id: str = None,
+                                 parent_id: str = None):
+        if chat_mode not in CHAT_MODES.keys():
+            raise ValueError(f"Chat mode {chat_mode} is not supported")
+
+        prompt = self._generate_prompt(update.message.text, dialog_messages, chat_mode)
+
+        initial_message: Message or None = None
+        chunk_index, chunk_text = (0, '')
+
+        async def message_update(every_seconds: float):
+            while True:
+                try:
+                    if initial_message is not None and chunk_text != initial_message.text:
+                        await initial_message.edit_text(chunk_text)
+                except (BadRequest, HTTPError, RetryAfter):
+                    pass
+                except Exception as e:
+                    logger.error(f"Error while editing the message: {str(e)}")
+
+                await asyncio.sleep(every_seconds)
+
+        message_update_task = context.application.create_task(message_update(every_seconds=0.5))
+        async for chunk in self.async_gpt_bot.ask(prompt, conversation_id=conversation_id, parent_id=parent_id):
+            if chunk_index == 0 and initial_message is None:
+                conversation_id = chunk['conversation_id']
+                parent_id = chunk['parent_id']
+                initial_message = await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    reply_to_message_id=update.message.message_id,
+                    text=chunk['message'] + '...'
+                )
+            chunk_index, chunk_text = (chunk_index + 1, chunk['message'])
+
+        message_update_task.cancel()
+        await initial_message.edit_text(chunk_text, parse_mode=ParseMode.MARKDOWN)
+        return chunk_text, prompt, conversation_id, parent_id
 
     @staticmethod
     def _generate_prompt(message, dialog_messages, chat_mode):
