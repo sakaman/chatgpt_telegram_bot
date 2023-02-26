@@ -9,3 +9,4 @@ tls-client
 requests
 aiohttp
 asyncio
+httpx

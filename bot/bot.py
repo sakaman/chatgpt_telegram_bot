@@ -19,6 +19,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     filters, ContextTypes
 )
+from telegram.request import HTTPXRequest
 
 import chatgpt
 import config
@@ -129,6 +130,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     # typing_task = context.application.create_task(send_typing_periodically(update, context, 4))
 
     message = message or update.message.text
+    logger.info(f"Send message to ChatGPT: {message}")
 
     dialog_id = db.get_user_attribute(user_id, "current_dialog_id")
     dialog_messages = db.get_dialog_messages(user_id, dialog_id)
@@ -289,10 +291,12 @@ def run_bot() -> None:
     application = (
         ApplicationBuilder()
         .token(config.telegram_token)
-        .connect_timeout(60)
-        .read_timeout(60)
-        .write_timeout(60)
-        .pool_timeout(60)
+        # .connect_timeout(60)
+        # .read_timeout(60)
+        # .write_timeout(60)
+        # .pool_timeout(60)
+        .request(HTTPXRequest(http_version="1.1"))
+        .get_updates_request(HTTPXRequest(http_version="1.1"))
         .build()
     )
 
