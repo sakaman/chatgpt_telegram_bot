@@ -18,7 +18,8 @@ services:
     image: desnowy/chatgpt-telegram-bot:latest
     restart: always
     volumes:
-      - ~/config:/config
+      - ~/config/config.yml:/app/config/config.yml
+      - ~/config/config.env:/app/config/config.env
     deploy:
       resources:
         limits:
