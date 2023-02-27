@@ -97,23 +97,29 @@ class ChatGPT:
                         await initial_message.edit_text(chunk_text)
                 except (BadRequest, HTTPError, RetryAfter):
                     pass
-                except Exception as e:
+                except Exception as emsg:
                     typing_task.cancel()
-                    logger.error(f"Error while editing the message: {str(e)}")
+                    logger.exception(f"Error while editing the message: {str(emsg)}")
 
                 await asyncio.sleep(every_seconds)
 
         message_update_task = context.application.create_task(message_update(every_seconds=0.5))
-        async for chunk in self.async_gpt_bot.ask(prompt, conversation_id=conversation_id, parent_id=parent_id):
-            if chunk_index == 0 and initial_message is None:
-                conversation_id = chunk['conversation_id']
-                parent_id = chunk['parent_id']
-                initial_message = await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    reply_to_message_id=update.message.message_id,
-                    text=chunk['message'] + '...'
-                )
-            chunk_index, chunk_text = (chunk_index + 1, chunk['message'])
+
+        try:
+            async for chunk in self.async_gpt_bot.ask(prompt, conversation_id=conversation_id, parent_id=parent_id, timeout=10):
+                if chunk_index == 0 and initial_message is None:
+                    conversation_id = chunk['conversation_id']
+                    parent_id = chunk['parent_id']
+                    initial_message = await context.bot.send_message(
+                        chat_id=update.effective_chat.id,
+                        reply_to_message_id=update.message.message_id,
+                        text=chunk['message'] + '...'
+                    )
+                chunk_index, chunk_text = (chunk_index + 1, chunk['message'])
+        except Exception as e:
+            logger.exception(f"Ask ChatGPT bot fail: {str(e)}")
+            typing_task.cancel()
+            message_update_task.cancel()
 
         message_update_task.cancel()
         typing_task.cancel()

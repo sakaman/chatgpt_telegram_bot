@@ -170,7 +170,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
     except (BadRequest, HTTPError, RetryAfter):
         pass
     except Exception as e:
-        logger.error("Send message error", e)
+        logger.exception(f"Send message error: {str(e)}")
         error_text = f"Something went wrong during completion.\nReason: {e}"
         # typing_task.cancel()
         await update.message.reply_text(error_text)
@@ -271,7 +271,7 @@ async def error_handle(update: object, context: CallbackContext) -> None:
         for message_chunk in message_chunks:
             await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
     except Exception as e:
-        logger.error(f"Some error happened: {str(e)}")
+        logger.exception(f"Some error happened: {str(e)}")
         await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
 
 
