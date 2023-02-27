@@ -106,7 +106,7 @@ class ChatGPT:
         message_update_task = context.application.create_task(message_update(every_seconds=0.5))
 
         try:
-            async for chunk in self.async_gpt_bot.ask(prompt, conversation_id=conversation_id, parent_id=parent_id, timeout=10):
+            async for chunk in self.async_gpt_bot.ask(prompt, conversation_id=conversation_id, parent_id=parent_id):
                 if chunk_index == 0 and initial_message is None:
                     conversation_id = chunk['conversation_id']
                     parent_id = chunk['parent_id']
