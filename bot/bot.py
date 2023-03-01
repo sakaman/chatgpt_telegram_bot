@@ -1,4 +1,3 @@
-import asyncio
 import html
 import json
 import logging
@@ -205,6 +204,10 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
 
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")
+    if async_chatgpt_bot is not None:
+        async_chatgpt_bot.reset_chat()
+    if chatgpt_bot is not None:
+        chatgpt_bot.reset_chat()
 
     chat_mode = db.get_user_attribute(user_id, "current_chat_mode")
     await update.message.reply_text(f"{chatgpt.CHAT_MODES[chat_mode]['welcome_message']}",
@@ -269,10 +272,15 @@ async def error_handle(update: object, context: CallbackContext) -> None:
         message_chunk_size = 4000
         message_chunks = [message[i:i + message_chunk_size] for i in range(0, len(message), message_chunk_size)]
         for message_chunk in message_chunks:
-            await context.bot.send_message(update.effective_chat.id, message_chunk, parse_mode=ParseMode.HTML)
+            await context.bot.send_message(chat_id=update.effective_chat.id,
+                                           reply_to_message_id=update.message.message_id,
+                                           text=message_chunk,
+                                           parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.exception(f"Some error happened: {str(e)}")
-        await context.bot.send_message(update.effective_chat.id, "Some error in error handler")
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       reply_to_message_id=update.message.message_id,
+                                       text="Some error in error handler")
 
 
 def run_bot() -> None:

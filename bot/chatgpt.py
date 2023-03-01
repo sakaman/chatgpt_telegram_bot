@@ -100,10 +100,16 @@ class ChatGPT:
                 except Exception as emsg:
                     typing_task.cancel()
                     logger.exception(f"Error while editing the message: {str(emsg)}")
+                    raise emsg
 
                 await asyncio.sleep(every_seconds)
 
         message_update_task = context.application.create_task(message_update(every_seconds=0.5))
+        # try:
+        #     await asyncio.wait_for(typing_task, 300)
+        # except TimeoutError:
+        #     logger.error("Ask timeout")
+        #     raise RuntimeError("Ask timeout")
 
         try:
             async for chunk in self.async_gpt_bot.ask(prompt, conversation_id=conversation_id, parent_id=parent_id):
@@ -120,11 +126,17 @@ class ChatGPT:
             logger.exception(f"Ask ChatGPT bot fail: {str(e)}")
             typing_task.cancel()
             message_update_task.cancel()
+            raise e
 
         message_update_task.cancel()
         typing_task.cancel()
         await initial_message.edit_text(chunk_text, parse_mode=ParseMode.MARKDOWN)
         return chunk_text, prompt, conversation_id, parent_id
+
+    def reset_bot(self, conversation_id):
+        if conversation_id is None:
+            self.async_gpt_bot.conversation_id = None
+            self.async_gpt_bot.parent_id = None
 
     @staticmethod
     def _generate_prompt(message, dialog_messages, chat_mode):
